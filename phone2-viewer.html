@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phone 2 – Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a; color: #fff;
+    font-family: 'Segoe UI', sans-serif;
+    min-height: 100vh; display: flex;
+    flex-direction: column; align-items: center;
+    justify-content: center; padding: 20px;
+  }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 24px; text-align: center; }
+  video {
+    width: 100%; max-width: 400px;
+    border-radius: 16px; background: #111;
+    border: 2px solid #222; min-height: 220px;
+  }
+  .input-row {
+    display: flex; gap: 8px; width: 100%;
+    max-width: 400px; margin-bottom: 12px;
+  }
+  input {
+    flex: 1; padding: 12px 16px;
+    background: #111; border: 1.5px solid #333;
+    border-radius: 10px; color: #fff; font-size: 15px;
+    outline: none; letter-spacing: 2px;
+    font-family: monospace;
+  }
+  input:focus { border-color: #25D366; }
+  input::placeholder { color: #444; letter-spacing: 0; font-size: 13px; }
+  .btn {
+    padding: 12px 20px; background: #25D366;
+    color: #fff; border: none; border-radius: 10px;
+    font-size: 14px; font-weight: 700; cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+  .btn-full {
+    width: 100%; max-width: 400px; margin-top: 8px;
+    padding: 14px; border-radius: 12px; font-size: 15px;
+  }
+  .btn-disconnect {
+    background: #c0392b; margin-top: 8px;
+  }
+  .status {
+    margin-top: 14px; padding: 10px 20px;
+    border-radius: 30px; font-size: 13px;
+    font-weight: 600; display: flex;
+    align-items: center; gap: 8px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .status.idle { background: #1a1a1a; color: #888; }
+  .status.idle .dot { background: #555; }
+  .status.connecting { background: #1a1500; color: #f0a500; }
+  .status.connecting .dot { background: #f0a500; animation: blink 0.7s infinite; }
+  .status.live { background: #0d2e1a; color: #25D366; }
+  .status.live .dot { background: #25D366; animation: blink 1s infinite; }
+  .status.error { background: #2e0d0d; color: #ff4444; }
+  .status.error .dot { background: #ff4444; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .controls {
+    display: flex; gap: 8px; margin-top: 10px;
+    width: 100%; max-width: 400px;
+  }
+  .ctrl-btn {
+    flex: 1; padding: 10px; background: #1a1a1a;
+    border: 1px solid #333; border-radius: 10px;
+    color: #fff; font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .ctrl-btn.active { background: #1a2e1a; border-color: #25D366; color: #25D366; }
+  .ctrl-btn:hover { background: #222; }
+  #log {
+    margin-top: 14px; width: 100%; max-width: 400px;
+    background: #111; border-radius: 10px;
+    padding: 12px; font-size: 11px; color: #555;
+    font-family: monospace; max-height: 100px;
+    overflow-y: auto; line-height: 1.8;
+  }
+  .fullscreen-hint {
+    margin-top: 8px; font-size: 11px; color: #444; text-align: center;
+  }
+
+  /* URL param auto-fill notice */
+  .autofill-notice {
+    background: #0d2e1a; border: 1px solid #25D366;
+    border-radius: 8px; padding: 8px 14px;
+    font-size: 12px; color: #25D366;
+    margin-bottom: 12px; width: 100%; max-width: 400px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<h1>👁️ Phone 2 — Viewer</h1>
+<p class="sub">Enter the Room ID from Phone 1<br>to see its live camera feed</p>
+
+<div class="autofill-notice" id="autofillNotice">
+  ✅ Room ID auto-filled from link!
+</div>
+
+<div class="input-row">
+  <input type="text" id="roomInput" placeholder="Enter Room ID (e.g. richy-cam-abc123)" />
+  <button class="btn" onclick="connect()" id="connectBtn">Connect</button>
+</div>
+
+<video id="remoteVideo" autoplay playsinline></video>
+
+<div class="status idle" id="status">
+  <div class="dot"></div>
+  <span id="statusText">Enter Room ID to connect</span>
+</div>
+
+<div class="controls" id="controls" style="display:none">
+  <button class="ctrl-btn active" id="audioBtn" onclick="toggleAudio()">🔊 Audio ON</button>
+  <button class="ctrl-btn active" id="fullBtn" onclick="goFullscreen()">⛶ Fullscreen</button>
+</div>
+
+<button class="btn btn-full btn-disconnect" id="disconnectBtn" style="display:none" onclick="disconnect()">
+  ⏹ Disconnect
+</button>
+
+<div class="fullscreen-hint">Tap video to fullscreen on mobile</div>
+
+<div id="log"></div>
+
+<script>
+  const ICE_SERVERS = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+  };
+
+  const PEERJS_CDN = 'https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js';
+  let peer, currentCall, remoteStream;
+  let audioEnabled = true;
+
+  function log(msg) {
+    const el = document.getElementById('log');
+    el.innerHTML += `<div>› ${msg}</div>`;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function setStatus(type, text) {
+    const s = document.getElementById('status');
+    s.className = 'status ' + type;
+    document.getElementById('statusText').textContent = text;
+  }
+
+  // Auto-fill room ID from URL param: viewer.html?room=richy-cam-abc123
+  window.onload = () => {
+    const params = new URLSearchParams(window.location.search);
+    const room = params.get('room');
+    if (room) {
+      document.getElementById('roomInput').value = room;
+      document.getElementById('autofillNotice').style.display = 'block';
+      log('Room ID auto-filled from link: ' + room);
+    }
+  };
+
+  function loadPeerJS(cb) {
+    if (window.Peer) return cb();
+    const s = document.createElement('script');
+    s.src = PEERJS_CDN;
+    s.onload = cb;
+    s.onerror = () => log('❌ Failed to load PeerJS. Check internet.');
+    document.head.appendChild(s);
+  }
+
+  function connect() {
+    const roomId = document.getElementById('roomInput').value.trim();
+    if (!roomId) { log('❌ Please enter a Room ID'); return; }
+
+    document.getElementById('connectBtn').disabled = true;
+    setStatus('connecting', 'Connecting to signaling server...');
+    log('Loading PeerJS...');
+
+    loadPeerJS(() => {
+      log('Connecting as viewer...');
+
+      // Give this viewer a unique ID
+      peer = new Peer('viewer-' + Math.random().toString(36).substr(2,6), { debug: 0 });
+
+      peer.on('open', (myId) => {
+        log('Connected to signaling. Calling Phone 1: ' + roomId);
+        setStatus('connecting', 'Ringing Phone 1...');
+
+        // Call Phone 1 with empty stream (we just want to receive)
+        const call = peer.call(roomId, createSilentStream());
+        currentCall = call;
+
+        call.on('stream', (stream) => {
+          remoteStream = stream;
+          document.getElementById('remoteVideo').srcObject = stream;
+          setStatus('live', '🟢 LIVE — Watching Phone 1');
+          document.getElementById('controls').style.display = 'flex';
+          document.getElementById('disconnectBtn').style.display = 'block';
+          log('✅ Stream received! Phone 1 camera is live.');
+        });
+
+        call.on('close', () => {
+          setStatus('idle', 'Call ended by Phone 1');
+          log('Call ended');
+          document.getElementById('controls').style.display = 'none';
+          document.getElementById('disconnectBtn').style.display = 'none';
+          document.getElementById('connectBtn').disabled = false;
+        });
+
+        call.on('error', (e) => {
+          setStatus('error', 'Call error: ' + e);
+          log('❌ Call error: ' + e);
+          document.getElementById('connectBtn').disabled = false;
+        });
+      });
+
+      peer.on('error', (e) => {
+        if (e.type === 'peer-unavailable') {
+          setStatus('error', 'Phone 1 not found. Is it running?');
+          log('❌ Room not found: ' + roomId);
+        } else {
+          setStatus('error', 'Error: ' + e.type);
+          log('❌ ' + e.type + ': ' + e.message);
+        }
+        document.getElementById('connectBtn').disabled = false;
+      });
+    });
+  }
+
+  // Need to send something to initiate the call — silent stream trick
+  function createSilentStream() {
+    const ctx = new AudioContext();
+    const dest = ctx.createMediaStreamDestination();
+    const osc = ctx.createOscillator();
+    osc.connect(dest);
+    osc.start();
+    return dest.stream;
+  }
+
+  function toggleAudio() {
+    if (!remoteStream) return;
+    audioEnabled = !audioEnabled;
+    remoteStream.getAudioTracks().forEach(t => t.enabled = audioEnabled);
+    const btn = document.getElementById('audioBtn');
+    btn.textContent = audioEnabled ? '🔊 Audio ON' : '🔇 Audio OFF';
+    btn.classList.toggle('active', audioEnabled);
+  }
+
+  function goFullscreen() {
+    const v = document.getElementById('remoteVideo');
+    if (v.requestFullscreen) v.requestFullscreen();
+    else if (v.webkitRequestFullscreen) v.webkitRequestFullscreen();
+  }
+
+  function disconnect() {
+    if (currentCall) currentCall.close();
+    if (peer) peer.destroy();
+    document.getElementById('remoteVideo').srcObject = null;
+    document.getElementById('controls').style.display = 'none';
+    document.getElementById('disconnectBtn').style.display = 'none';
+    document.getElementById('connectBtn').disabled = false;
+    setStatus('idle', 'Disconnected');
+    log('Disconnected');
+  }
+
+  // Tap video to fullscreen on mobile
+  document.getElementById('remoteVideo').addEventListener('click', goFullscreen);
+</script>
+
+</body>
+</html>

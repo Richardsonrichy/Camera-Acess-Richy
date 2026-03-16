@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phone 1 – Camera Sender</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a; color: #fff;
+    font-family: 'Segoe UI', sans-serif;
+    min-height: 100vh; display: flex;
+    flex-direction: column; align-items: center;
+    justify-content: center; padding: 20px;
+  }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 24px; }
+  video {
+    width: 100%; max-width: 400px;
+    border-radius: 16px; background: #111;
+    border: 2px solid #222;
+  }
+  .status {
+    margin-top: 16px; padding: 10px 20px;
+    border-radius: 30px; font-size: 13px;
+    font-weight: 600; display: flex;
+    align-items: center; gap: 8px;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .status.waiting { background: #1a1a1a; color: #888; }
+  .status.waiting .dot { background: #555; }
+  .status.connected { background: #0d2e1a; color: #25D366; }
+  .status.connected .dot { background: #25D366; animation: blink 1s infinite; }
+  .status.live { background: #1a0a0a; color: #ff4444; }
+  .status.live .dot { background: #ff4444; animation: blink 0.5s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .room-id {
+    margin-top: 12px; background: #111;
+    border: 1px solid #222; border-radius: 10px;
+    padding: 12px 20px; font-size: 13px; color: #aaa;
+    text-align: center;
+  }
+  .room-id span { color: #fff; font-weight: 700; font-size: 16px; letter-spacing: 2px; }
+  .btn {
+    margin-top: 16px; padding: 14px 32px;
+    background: #25D366; color: #fff;
+    border: none; border-radius: 12px;
+    font-size: 15px; font-weight: 700;
+    cursor: pointer; width: 100%; max-width: 400px;
+  }
+  .btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+  .btn-stop {
+    margin-top: 8px; background: #c0392b;
+  }
+  #log {
+    margin-top: 16px; width: 100%; max-width: 400px;
+    background: #111; border-radius: 10px;
+    padding: 12px; font-size: 11px; color: #555;
+    font-family: monospace; max-height: 100px;
+    overflow-y: auto; line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+
+<h1>📡 Phone 1 — Sender</h1>
+<p class="sub">This phone streams its camera to Phone 2</p>
+
+<video id="localVideo" autoplay muted playsinline></video>
+
+<div class="status waiting" id="status">
+  <div class="dot"></div>
+  <span id="statusText">Waiting to start...</span>
+</div>
+
+<div class="room-id">
+  Room ID: <span id="roomDisplay">—</span>
+</div>
+
+<button class="btn" id="startBtn" onclick="startStreaming()">📷 Start Camera & Stream</button>
+<button class="btn btn-stop" id="stopBtn" onclick="stopStreaming()" style="display:none">⏹ Stop Streaming</button>
+
+<div id="log"></div>
+
+<script>
+  // ─── CONFIG ───────────────────────────────────────────
+  // Using free public STUN servers (Google's) — no setup needed
+  const ICE_SERVERS = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+  };
+
+  // ─── We use a free public signaling service for demo ──
+  // PeerJS uses their free cloud server to exchange connection info
+  // In production you'd use your own Spring Boot signaling server
+  const PEERJS_CDN = 'https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js';
+
+  let peer, localStream, currentCall;
+  const ROOM_ID = 'richy-cam-' + Math.random().toString(36).substr(2, 6);
+
+  function log(msg) {
+    const el = document.getElementById('log');
+    el.innerHTML += `<div>› ${msg}</div>`;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function setStatus(type, text) {
+    const s = document.getElementById('status');
+    s.className = 'status ' + type;
+    document.getElementById('statusText').textContent = text;
+  }
+
+  function loadPeerJS(cb) {
+    if (window.Peer) return cb();
+    const s = document.createElement('script');
+    s.src = PEERJS_CDN;
+    s.onload = cb;
+    s.onerror = () => log('❌ Failed to load PeerJS. Check internet.');
+    document.head.appendChild(s);
+  }
+
+  async function startStreaming() {
+    document.getElementById('startBtn').disabled = true;
+    log('Requesting camera & mic permission...');
+
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: 1280, height: 720 },
+        audio: true
+      });
+      document.getElementById('localVideo').srcObject = localStream;
+      log('✅ Camera & mic access granted');
+    } catch (e) {
+      log('❌ Camera denied: ' + e.message);
+      document.getElementById('startBtn').disabled = false;
+      return;
+    }
+
+    setStatus('waiting', 'Loading signaling...');
+    loadPeerJS(() => {
+      log('PeerJS loaded, connecting to signaling server...');
+
+      peer = new Peer(ROOM_ID, { debug: 0 });
+
+      peer.on('open', (id) => {
+        document.getElementById('roomDisplay').textContent = id;
+        setStatus('connected', 'Ready — waiting for Phone 2 to connect');
+        document.getElementById('stopBtn').style.display = 'block';
+        log('✅ Connected! Room ID: ' + id);
+        log('📲 Share this ID with Phone 2');
+      });
+
+      peer.on('call', (call) => {
+        log('📞 Phone 2 is connecting...');
+        currentCall = call;
+        call.answer(localStream);
+        setStatus('live', '🔴 LIVE — Phone 2 connected');
+        log('✅ Streaming LIVE to Phone 2!');
+
+        call.on('close', () => {
+          setStatus('connected', 'Phone 2 disconnected. Waiting...');
+          log('Phone 2 disconnected');
+        });
+      });
+
+      peer.on('error', (e) => {
+        log('❌ Error: ' + e.type + ' — ' + e.message);
+        setStatus('waiting', 'Error. Try again.');
+      });
+    });
+  }
+
+  function stopStreaming() {
+    if (localStream) localStream.getTracks().forEach(t => t.stop());
+    if (peer) peer.destroy();
+    document.getElementById('localVideo').srcObject = null;
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').style.display = 'none';
+    setStatus('waiting', 'Stopped');
+    log('Stream stopped');
+  }
+</script>
+
+</body>
+</html>
