@@ -110,7 +110,20 @@
   <button class="btn" onclick="connect()" id="connectBtn">Connect</button>
 </div>
 
-<video id="remoteVideo" autoplay playsinline></video>
+<div style="position:relative;width:100%;max-width:400px;">
+  <video id="remoteVideo" autoplay playsinline webkit-playsinline
+    style="width:100%;border-radius:16px;background:#111;border:2px solid #222;min-height:220px;display:block;">
+  </video>
+  <div id="tapToPlay" onclick="manualPlay()" style="
+    display:none;position:absolute;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.6);border-radius:16px;
+    align-items:center;justify-content:center;flex-direction:column;
+    cursor:pointer;gap:10px;
+  ">
+    <div style="font-size:48px;">▶️</div>
+    <div style="font-size:14px;font-weight:700;color:#fff;">Tap to Play Video</div>
+  </div>
+</div>
 
 <div class="status idle" id="status">
   <div class="dot"></div>
@@ -198,7 +211,21 @@
 
         call.on('stream', (stream) => {
           remoteStream = stream;
-          document.getElementById('remoteVideo').srcObject = stream;
+          const video = document.getElementById('remoteVideo');
+
+          // Fix for Android Chrome — must set srcObject then manually call play()
+          video.srcObject = null;
+          setTimeout(() => {
+            video.srcObject = stream;
+            video.muted = false;
+            video.play().then(() => {
+              log('✅ Video playing!');
+            }).catch((e) => {
+              log('⚠️ Autoplay blocked — tap the video to play');
+              document.getElementById('tapToPlay').style.display = 'flex';
+            });
+          }, 300);
+
           setStatus('live', '🟢 LIVE — Watching Phone 1');
           document.getElementById('controls').style.display = 'flex';
           document.getElementById('disconnectBtn').style.display = 'block';
@@ -271,6 +298,14 @@
 
   // Tap video to fullscreen on mobile
   document.getElementById('remoteVideo').addEventListener('click', goFullscreen);
+
+  function manualPlay() {
+    const video = document.getElementById('remoteVideo');
+    video.play().then(() => {
+      document.getElementById('tapToPlay').style.display = 'none';
+      log('✅ Video playing after tap!');
+    }).catch(e => log('❌ Still cannot play: ' + e));
+  }
 </script>
 
 </body>
